@@ -138,28 +138,44 @@ class MainWindow(QMainWindow):
         bestScore = 0
         newScore = 0
         sim = [0]*len(keyPoints)
+
         for i in range(len(keyPoints)):
-            keyPoints[i] = keyPoints[i].lower()
+
+            #split the resume point into the keywords
             sentence = keyPoints[i].split()
+
             for u in range(len(sentence)):
                 word = sentence[u]
                 bestWord = word
                 bestScore = 0
+
+                #for each word find common synonyms and compare to find similarities between resume points and posting
                 for synonymSet in wordnet.synsets(word):
                     for lemma in synonymSet.lemmas():
+
+                        #remake the sentence with the current synonyms 
                         tempSentence = " ".join(sentence)
                         newTempSentence = tempSentence.replace(word,lemma.name())
-                        newScore = self.compareSentences(newTempSentence, Require[0].lower())
+
+                        #compare the point against the job posting and develop a score
+                        newScore = compareSentences(newTempSentence, Require[0].lower())
+
+                        #Record the best score for the point for that synonym 
                         if newScore > bestScore:
                             bestScore = newScore
                             bestWord = lemma.name()
+
+                #change the sentence to use the best synonym thus accumulating the overall best score for the point 
                 sentence[u]=bestWord
+
+                #resord the top score for that resume point 
             if bestScore > sim[i]:
                 sim[i] = bestScore
-                for i in range(len(pa)):
-                    if (i%2 ==0):
-                        point.append(pa[i].text)
+
+        #sorting the sim scores 
         topPoints = sorted(range(len(sim)), key=lambda i: sim[i], reverse=True)[:numberOfPoints]
+
+        #output the number of points (as requested by the user) and their unique ocrrelation score
         for k in range(len(topPoints)):
             #This is where you change the bottom text box
             self.resultsbox.insertPlainText(f'{sim[topPoints[k]]*100:2.2f} ' + point[topPoints[k]] + '\n')
@@ -175,56 +191,109 @@ class MainWindow(QMainWindow):
 
         pdfFileObj.close()  
 
-    def textClean (self,point):
+      #Function to clean code (remove punctuation, remove filler words, correct common pdf reader errors)
+    def textClean (point):
         keyP = []
-        filler = ['good','to', 'and', 'a', 'for', 'with', 'by', 'in', 'the', 'as', 'such', 'of', 'experience', 'through', 'competencies', 'attained','completion', 'would','further', 'implemented', 'ensure', 'executing', 'at', 'previous', 'based','are', 'an', 'be', 'or', 'will', 'is', 'both', 'but', 'not', 'should', 'have', 'proficiency', 'related', 'taking', 'required', 'applicant', 'applicants','4-month', '8-month', 'one', 'two', 'three', 'pursuing']
 
+        #current list of common filler words used in job postings and resume points
+        filler = ['you','this','good','to', 'and', 'a', 'for', 'with', 'by', 'in', 'the', 'as', 'such', 'of', 'experience', 'through', 'competencies', 'attained','completion', 'would','further', 'implemented', 
+            'ensure', 'executing', 'at', 'previous', 'based','are', 'an', 'be', 'or', 'will', 'is', 'both', 'but', 'not', 'should', 'have', 'proficiency', 'related', 'taking', 'required', 'applicant', 'applicants',
+            '4-month', '8-month', 'one', 'two', 'three', 'pursuing', 'ability', 'familiarity', 'knowledge', 'mandatory', 'some', 'understanding', 'quickly','come', 'considered', 'concepts', 'preferably', 'learn',
+            'thorough', 'about', 'your', 'sense', 'placements', 'sept', 'date', '2021', 'discipline']
+
+        #prepare punctuation library to required elements
         remov = string.punctuation
         remov = remov.replace("-", "")
         remov = remov.replace("/", "")
 
         for i in range(len(point)):
+
+            #break the input into individual words
             words = point[i].split()
             for p in range(len(words)):
+
+                #make all the words lowercase
                 words[p] = words[p].lower()
+
+                #remove all punctuation
                 table = str.maketrans(dict.fromkeys(remov))
                 words[p] = words[p].translate(table)
-                #words[p]= words[p].split("-", 1)[0]
+
+                #Remove characters requiring special care including pdf reader characters
                 words[p]= words[p].split("/", 1)[0]
                 words[p]= words[p].replace("Ł", " ")
                 words[p]= words[p].replace("ł", " ")
+                words[p]= words[p].replace("-€€", " ")
                 words[p]= words[p].replace("€€", " ")
-    
-            for j in range(len(filler)):
-                while (filler[j] in words):
-                    words.remove(filler[j])
-                # print(words[0])
+                words[p]= words[p].replace("  ", " ")
 
-            text = " ".join(words)
+            #remove multi-word words when line breaks confuse the pdf reader
+            for p in range(len(words)):
+                if ' ' in words[p]:
+                    firstHalf = (words[p].partition(' '))[0]
+                    words[p] = firstHalf
+
+            #sort words and remove duplicates as not to weight the scoring
+            words.sort()
+            finalList = list()
+
+            for oneWord in words:
+                if oneWord not in finalList:           
+                    finalList.append(oneWord) 
+
+            #Remove all known filler words
+            for j in range(len(filler)):
+                while (filler[j] in finalList):
+                    finalList.remove(filler[j])
+
+            #combine the remianing words
+            text = " ".join(finalList)
             keyP.append(text)
             words.clear()
-        return keyP 
 
-    def compareSentences(self,app, point):
+        #return the list of "cleaned" phrases
+        return keyP
+
+    #Function to perform comparison of resume points and selected job posting
+    def compareSentences (app, point):
+
+        #reset score
         score = 0
 
+        #split sentences into array of words
         appSet = app.split(' ')
         pointSet = point.split(' ')
 
-        #lev, difflab SequenceMatcher
+        #resets 
         bestConnectScore = 0
         connectScore = 0
         scoreArray = [0]*len(pointSet)
+        refinedArray = []
+
         for i in range(len(pointSet)):
             bestConnectScore = 0
             connectScore = 0
+
             for j in range(len(appSet)):
+
+                #apply Levenshtein theorm of comparison to determine the similarities in keywords
                 connectScore = lev.ratio(pointSet[i], appSet[j])
                 if connectScore > bestConnectScore:
                     bestConnectScore = connectScore
+
+            #store the best score
             scoreArray[i] = bestConnectScore
 
-        score = sum(scoreArray) / len(scoreArray)
+        #apply a weighting function - only consider and record scores over 80% similar
+        for i in range(len(scoreArray)):
+            if scoreArray[i] > 0.5:
+                refinedArray.append(scoreArray[i])
+
+        #average the scores to determine an overall for the resume point 
+        if len(refinedArray) != 0:
+            score = sum(refinedArray) / len(refinedArray)
+        else:
+            score = 0
 
         return score
 
